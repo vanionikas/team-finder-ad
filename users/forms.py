@@ -4,23 +4,12 @@ from django import forms
 from django.contrib.auth import authenticate
 from django.contrib.auth.forms import PasswordChangeForm as DjangoPasswordChangeForm
 
+from core.mixins import GithubUrlMixin
+from .constants import USER_NAME_MAX_LENGTH
 from .models import User
+from .service import normalize_phone
 
 PHONE_RE = re.compile(r'^(\+7|8)\d{10}$')
-GITHUB_RE = re.compile(r'^https?://(www\.)?github\.com/', re.IGNORECASE)
-
-
-def _normalize_phone(phone: str) -> str:
-    """Convert 8XXXXXXXXXX to +7XXXXXXXXXX."""
-    phone = phone.strip()
-    if phone.startswith('8'):
-        phone = '+7' + phone[1:]
-    return phone
-
-
-def _validate_github_url(value: str) -> None:
-    if value and not GITHUB_RE.match(value):
-        raise forms.ValidationError('Ссылка должна вести на GitHub (github.com).')
 
 
 class LoginForm(forms.Form):
@@ -55,12 +44,12 @@ class LoginForm(forms.Form):
 class RegisterForm(forms.Form):
     name = forms.CharField(
         label='Имя',
-        max_length=124,
+        max_length=USER_NAME_MAX_LENGTH,
         widget=forms.TextInput(attrs={'placeholder': 'Иван'}),
     )
     surname = forms.CharField(
         label='Фамилия',
-        max_length=124,
+        max_length=USER_NAME_MAX_LENGTH,
         widget=forms.TextInput(attrs={'placeholder': 'Иванов'}),
     )
     email = forms.EmailField(
@@ -79,7 +68,7 @@ class RegisterForm(forms.Form):
         return email
 
 
-class EditProfileForm(forms.ModelForm):
+class EditProfileForm(GithubUrlMixin, forms.ModelForm):
     class Meta:
         model = User
         fields = ['name', 'surname', 'avatar', 'about', 'phone', 'github_url']
@@ -108,18 +97,13 @@ class EditProfileForm(forms.ModelForm):
             raise forms.ValidationError(
                 'Введите номер в формате +7XXXXXXXXXX или 8XXXXXXXXXX.'
             )
-        phone = _normalize_phone(phone)
+        phone = normalize_phone(phone)
         qs = User.objects.filter(phone=phone)
         if self.instance and self.instance.pk:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
             raise forms.ValidationError('Этот номер телефона уже используется.')
         return phone
-
-    def clean_github_url(self):
-        value = self.cleaned_data.get('github_url', '')
-        _validate_github_url(value)
-        return value
 
 
 class PasswordChangeForm(DjangoPasswordChangeForm):

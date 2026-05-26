@@ -9,4 +9,3 @@ class ProjectAdmin(admin.ModelAdmin):
     list_filter = ('status',)
     search_fields = ('name', 'owner__email', 'owner__name')
     filter_horizontal = ('participants', 'skills')
-    ordering = ('-created_at',)

@@ -1,135 +1,122 @@
 import json
+from http import HTTPStatus
 
-from django.contrib.auth import login, logout, update_session_auth_hash
-from django.core.paginator import Paginator
+from django.contrib.auth import login, logout
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.views import PasswordChangeView as DjangoPasswordChangeView
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import get_object_or_404, redirect
+from django.urls import reverse
 from django.views import View
+from django.views.generic import DetailView, FormView, ListView, UpdateView
 
+from .constants import AUTOCOMPLETE_LIMIT, USERS_PER_PAGE
 from .forms import EditProfileForm, LoginForm, PasswordChangeForm, RegisterForm
 from .models import Skill, User
-
-USERS_PER_PAGE = 12
-AUTOCOMPLETE_LIMIT = 10
+from .service import query_prefix
 
 
-def _query_prefix(request, exclude='page'):
-    params = request.GET.copy()
-    params.pop(exclude, None)
-    qs = params.urlencode()
-    return (qs + '&') if qs else ''
+class LoginView(FormView):
+    template_name = 'users/login.html'
+    form_class = LoginForm
 
-
-class LoginView(View):
-    def get(self, request):
+    def dispatch(self, request, *args, **kwargs):
         if request.user.is_authenticated:
-            return redirect('/projects/list')
-        return render(request, 'users/login.html', {'form': LoginForm()})
+            return redirect(reverse('projects:list'))
+        return super().dispatch(request, *args, **kwargs)
 
-    def post(self, request):
-        form = LoginForm(request.POST, request=request)
-        if form.is_valid():
-            login(request, form.get_user())
-            return redirect(request.GET.get('next', '/projects/list'))
-        return render(request, 'users/login.html', {'form': form})
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['request'] = self.request
+        return kwargs
+
+    def form_valid(self, form):
+        login(self.request, form.get_user())
+        return redirect(self.request.GET.get('next') or reverse('projects:list'))
 
 
-class RegisterView(View):
-    def get(self, request):
+class RegisterView(FormView):
+    template_name = 'users/register.html'
+    form_class = RegisterForm
+
+    def dispatch(self, request, *args, **kwargs):
         if request.user.is_authenticated:
-            return redirect('/projects/list')
-        return render(request, 'users/register.html', {'form': RegisterForm()})
+            return redirect(reverse('projects:list'))
+        return super().dispatch(request, *args, **kwargs)
 
-    def post(self, request):
-        form = RegisterForm(request.POST)
-        if form.is_valid():
-            User.objects.create_user(
-                email=form.cleaned_data['email'],
-                name=form.cleaned_data['name'],
-                surname=form.cleaned_data['surname'],
-                password=form.cleaned_data['password'],
-            )
-            return redirect('/users/login/')
-        return render(request, 'users/register.html', {'form': form})
+    def form_valid(self, form):
+        User.objects.create_user(
+            email=form.cleaned_data['email'],
+            name=form.cleaned_data['name'],
+            surname=form.cleaned_data['surname'],
+            password=form.cleaned_data['password'],
+        )
+        return redirect(reverse('users:login'))
 
 
 class LogoutView(View):
     def get(self, request):
         logout(request)
-        return redirect('/projects/list')
+        return redirect(reverse('projects:list'))
 
 
-class UserDetailView(View):
-    def get(self, request, pk):
-        profile_user = get_object_or_404(User, pk=pk)
-        return render(request, 'users/user-details.html', {'user': profile_user})
+class UserDetailView(DetailView):
+    model = User
+    template_name = 'users/user-details.html'
+    context_object_name = 'user'
 
 
-class EditProfileView(View):
-    def get(self, request):
-        if not request.user.is_authenticated:
-            return redirect('/users/login/?next=/users/edit-profile/')
-        form = EditProfileForm(instance=request.user)
-        return render(request, 'users/edit_profile.html', {'form': form})
+class EditProfileView(LoginRequiredMixin, UpdateView):
+    template_name = 'users/edit_profile.html'
+    form_class = EditProfileForm
 
-    def post(self, request):
-        if not request.user.is_authenticated:
-            return redirect('/users/login/')
-        form = EditProfileForm(request.POST, request.FILES, instance=request.user)
-        if form.is_valid():
-            form.save()
-            return redirect(f'/users/{request.user.id}/')
-        return render(request, 'users/edit_profile.html', {'form': form})
+    def get_object(self, queryset=None):
+        return self.request.user
+
+    def get_success_url(self):
+        return reverse('users:detail', kwargs={'pk': self.request.user.pk})
 
 
-class ChangePasswordView(View):
-    def get(self, request):
-        if not request.user.is_authenticated:
-            return redirect('/users/login/?next=/users/change-password/')
-        form = PasswordChangeForm(request.user)
-        return render(request, 'users/change_password.html', {'form': form})
+class ChangePasswordView(DjangoPasswordChangeView):
+    template_name = 'users/change_password.html'
+    form_class = PasswordChangeForm
 
-    def post(self, request):
-        if not request.user.is_authenticated:
-            return redirect('/users/login/')
-        form = PasswordChangeForm(request.user, request.POST)
-        if form.is_valid():
-            update_session_auth_hash(request, form.save())
-            return redirect(f'/users/{request.user.id}/')
-        return render(request, 'users/change_password.html', {'form': form})
+    def get_success_url(self):
+        return reverse('users:detail', kwargs={'pk': self.request.user.pk})
 
 
-class UserListView(View):
-    def get(self, request):
-        users_qs = User.objects.all().order_by('-date_joined')
-        active_skill = request.GET.get('skill', '')
+class UserListView(ListView):
+    model = User
+    template_name = 'users/participants.html'
+    paginate_by = USERS_PER_PAGE
 
+    def get_queryset(self):
+        qs = User.objects.all()
+        active_skill = self.request.GET.get('skill', '')
         if active_skill:
-            users_qs = users_qs.filter(skills__name=active_skill).distinct()
+            qs = qs.filter(skills__name=active_skill).distinct()
+        return qs
 
-        all_skills = (
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['active_skill'] = self.request.GET.get('skill', '')
+        ctx['all_skills'] = (
             Skill.objects.filter(users__isnull=False)
             .values_list('name', flat=True)
             .distinct()
             .order_by('name')
         )
-
-        paginator = Paginator(users_qs, USERS_PER_PAGE)
-        page_obj = paginator.get_page(request.GET.get('page', 1))
-
-        return render(request, 'users/participants.html', {
-            'page_obj': page_obj,
-            'active_skill': active_skill,
-            'all_skills': all_skills,
-            'query_prefix': _query_prefix(request),
-        })
+        ctx['query_prefix'] = query_prefix(self.request)
+        return ctx
 
 
 class SkillsAutocompleteView(View):
     def get(self, request):
         q = request.GET.get('q', '').strip()
         skills = (
-            Skill.objects.filter(name__istartswith=q).order_by('name').values('id', 'name')[:AUTOCOMPLETE_LIMIT]
+            Skill.objects.filter(name__istartswith=q)
+            .order_by('name')
+            .values('id', 'name')[:AUTOCOMPLETE_LIMIT]
         )
         return JsonResponse(list(skills), safe=False)
 
@@ -137,7 +124,7 @@ class SkillsAutocompleteView(View):
 class AddUserSkillView(View):
     def post(self, request, pk):
         if not request.user.is_authenticated or request.user.id != pk:
-            return JsonResponse({'error': 'Forbidden'}, status=403)
+            return JsonResponse({'error': 'Forbidden'}, status=HTTPStatus.FORBIDDEN)
         data = json.loads(request.body)
         skill_id = data.get('skill_id')
         name = data.get('name', '').strip()
@@ -146,7 +133,7 @@ class AddUserSkillView(View):
         elif name:
             skill, _ = Skill.objects.get_or_create(name=name)
         else:
-            return JsonResponse({'error': 'No skill data'}, status=400)
+            return JsonResponse({'error': 'No skill data'}, status=HTTPStatus.BAD_REQUEST)
         request.user.skills.add(skill)
         return JsonResponse({'id': skill.id, 'name': skill.name})
 
@@ -154,7 +141,7 @@ class AddUserSkillView(View):
 class RemoveUserSkillView(View):
     def post(self, request, pk, skill_id):
         if not request.user.is_authenticated or request.user.id != pk:
-            return JsonResponse({'error': 'Forbidden'}, status=403)
+            return JsonResponse({'error': 'Forbidden'}, status=HTTPStatus.FORBIDDEN)
         skill = get_object_or_404(Skill, pk=skill_id)
         request.user.skills.remove(skill)
         return JsonResponse({'ok': True})

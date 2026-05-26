@@ -1,105 +1,82 @@
-from django.core.paginator import Paginator
-from django.http import JsonResponse
-from django.shortcuts import get_object_or_404, redirect, render
-from django.views import View
+from http import HTTPStatus
 
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, redirect
+from django.urls import reverse
+from django.views import View
+from django.views.generic import CreateView, DetailView, ListView, UpdateView
+
+from .constants import PROJECTS_PER_PAGE
 from .forms import ProjectForm
 from .models import Project
-
-PROJECTS_PER_PAGE = 12
-
-
-def _query_prefix(request, exclude='page'):
-    params = request.GET.copy()
-    params.pop(exclude, None)
-    qs = params.urlencode()
-    return (qs + '&') if qs else ''
+from .service import query_prefix
 
 
-class ProjectListView(View):
-    def get(self, request):
-        projects_qs = Project.objects.select_related('owner').prefetch_related(
-            'participants'
-        ).order_by('-created_at')
+class ProjectListView(ListView):
+    model = Project
+    template_name = 'projects/project_list.html'
+    paginate_by = PROJECTS_PER_PAGE
 
-        paginator = Paginator(projects_qs, PROJECTS_PER_PAGE)
-        page_obj = paginator.get_page(request.GET.get('page', 1))
+    def get_queryset(self):
+        return Project.objects.select_related('owner').prefetch_related('participants')
 
-        return render(request, 'projects/project_list.html', {
-            'page_obj': page_obj,
-            'projects': projects_qs,
-            'query_prefix': _query_prefix(request),
-        })
-
-
-class ProjectDetailView(View):
-    def get(self, request, pk):
-        project = get_object_or_404(
-            Project.objects.select_related('owner').prefetch_related('participants'),
-            pk=pk,
-        )
-        return render(request, 'projects/project-details.html', {'project': project})
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['projects'] = self.object_list
+        ctx['query_prefix'] = query_prefix(self.request)
+        return ctx
 
 
-class CreateProjectView(View):
-    def get(self, request):
-        if not request.user.is_authenticated:
-            return redirect('/users/login/?next=/projects/create-project')
-        return render(request, 'projects/create-project.html', {
-            'form': ProjectForm(),
-            'is_edit': False,
-        })
+class ProjectDetailView(DetailView):
+    template_name = 'projects/project-details.html'
+    context_object_name = 'project'
 
-    def post(self, request):
-        if not request.user.is_authenticated:
-            return redirect('/users/login/')
-        form = ProjectForm(request.POST)
-        if form.is_valid():
-            project = form.save(commit=False)
-            project.owner = request.user
-            project.save()
-            project.participants.add(request.user)
-            return redirect(f'/projects/{project.id}')
-        return render(request, 'projects/create-project.html', {
-            'form': form,
-            'is_edit': False,
-        })
+    def get_queryset(self):
+        return Project.objects.select_related('owner').prefetch_related('participants')
 
 
-class EditProjectView(View):
-    def get(self, request, pk):
-        if not request.user.is_authenticated:
-            return redirect(f'/users/login/?next=/projects/{pk}/edit')
-        project = get_object_or_404(Project, pk=pk, owner=request.user)
-        form = ProjectForm(instance=project)
-        return render(request, 'projects/create-project.html', {
-            'form': form,
-            'is_edit': True,
-            'project': project,
-        })
+class CreateProjectView(LoginRequiredMixin, CreateView):
+    template_name = 'projects/create-project.html'
+    form_class = ProjectForm
 
-    def post(self, request, pk):
-        if not request.user.is_authenticated:
-            return redirect('/users/login/')
-        project = get_object_or_404(Project, pk=pk, owner=request.user)
-        form = ProjectForm(request.POST, instance=project)
-        if form.is_valid():
-            form.save()
-            return redirect(f'/projects/{project.id}')
-        return render(request, 'projects/create-project.html', {
-            'form': form,
-            'is_edit': True,
-            'project': project,
-        })
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['is_edit'] = False
+        return ctx
+
+    def form_valid(self, form):
+        project = form.save(commit=False)
+        project.owner = self.request.user
+        project.save()
+        project.participants.add(self.request.user)
+        return redirect(reverse('projects:detail', kwargs={'pk': project.pk}))
+
+
+class EditProjectView(LoginRequiredMixin, UpdateView):
+    template_name = 'projects/create-project.html'
+    form_class = ProjectForm
+
+    def get_queryset(self):
+        return Project.objects.filter(owner=self.request.user)
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['is_edit'] = True
+        ctx['project'] = self.object
+        return ctx
+
+    def get_success_url(self):
+        return reverse('projects:detail', kwargs={'pk': self.object.pk})
 
 
 class CompleteProjectView(View):
     def post(self, request, pk):
         if not request.user.is_authenticated:
-            return JsonResponse({'error': 'Unauthorized'}, status=401)
+            return JsonResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED)
         project = get_object_or_404(Project, pk=pk, owner=request.user)
         if project.status != Project.STATUS_OPEN:
-            return JsonResponse({'error': 'Project is already closed'}, status=400)
+            return JsonResponse({'error': 'Project is already closed'}, status=HTTPStatus.BAD_REQUEST)
         project.status = Project.STATUS_CLOSED
         project.save(update_fields=['status'])
         return JsonResponse({'status': 'ok', 'project_status': 'closed'})
@@ -108,13 +85,12 @@ class CompleteProjectView(View):
 class ToggleParticipateView(View):
     def post(self, request, pk):
         if not request.user.is_authenticated:
-            return JsonResponse({'error': 'Unauthorized'}, status=401)
+            return JsonResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED)
         project = get_object_or_404(Project, pk=pk)
         if request.user == project.owner:
-            return JsonResponse({'error': 'Owner cannot participate'}, status=400)
-        if request.user in project.participants.all():
+            return JsonResponse({'error': 'Owner cannot participate'}, status=HTTPStatus.BAD_REQUEST)
+        if project.participants.filter(pk=request.user.pk).exists():
             project.participants.remove(request.user)
             return JsonResponse({'status': 'ok', 'participant': False})
-        else:
-            project.participants.add(request.user)
-            return JsonResponse({'status': 'ok', 'participant': True})
+        project.participants.add(request.user)
+        return JsonResponse({'status': 'ok', 'participant': True})

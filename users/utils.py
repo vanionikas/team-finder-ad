@@ -6,12 +6,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from PIL import Image, ImageDraw, ImageFont
 
-AVATAR_COLORS = [
-    '#4A90D9', '#6B7280', '#10B981', '#F59E0B',
-    '#8B5CF6', '#EC4899', '#14B8A6', '#F97316',
-]
-AVATAR_SIZE = 200
-AVATAR_FONT_SIZE = 90
+from .constants import AVATAR_COLORS, AVATAR_FONT_SIZE, AVATAR_SIZE, AVATAR_TEXT_COLOR
 
 FONT_PATH = settings.BASE_DIR / 'static' / 'fonts' / 'Neue_Haas_Grotesk_Display_Pro_75_Bold.otf'
 
@@ -33,7 +28,7 @@ def generate_user_avatar(letter: str) -> ContentFile:
     th = bbox[3] - bbox[1]
     x = (AVATAR_SIZE - tw) / 2 - bbox[0]
     y = (AVATAR_SIZE - th) / 2 - bbox[1]
-    draw.text((x, y), letter, fill='white', font=font)
+    draw.text((x, y), letter, fill=AVATAR_TEXT_COLOR, font=font)
 
     buf = io.BytesIO()
     img.save(buf, format='PNG')

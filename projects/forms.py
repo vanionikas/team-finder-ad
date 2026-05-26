@@ -1,13 +1,10 @@
-import re
-
 from django import forms
 
+from core.mixins import GithubUrlMixin
 from .models import Project
 
-GITHUB_RE = re.compile(r'^https?://(www\.)?github\.com/', re.IGNORECASE)
 
-
-class ProjectForm(forms.ModelForm):
+class ProjectForm(GithubUrlMixin, forms.ModelForm):
     class Meta:
         model = Project
         fields = ['name', 'description', 'github_url', 'status']
@@ -26,9 +23,3 @@ class ProjectForm(forms.ModelForm):
                 attrs={'placeholder': 'https://github.com/username/repo'}
             ),
         }
-
-    def clean_github_url(self):
-        value = self.cleaned_data.get('github_url', '')
-        if value and not GITHUB_RE.match(value):
-            raise forms.ValidationError('Ссылка должна вести на GitHub (github.com).')
-        return value
