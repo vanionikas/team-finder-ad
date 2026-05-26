@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8" />
     <title>{% block title %}TeamFinder{% endblock %}</title>
+    <link rel="icon" type="image/jpeg" href="{% static 'images/favicon.jpg' %}">
     <link rel="stylesheet" href="{% static 'css/base.css' %}">
     <link rel="stylesheet" href="{% static 'css/header.css' %}">
     {% block extra_css %}{% endblock %}
@@ -11,6 +12,7 @@
 <body data-page="{% block page_id %}default{% endblock %}">
 {% include 'includes/header.html' %}
 {% block content %}{% endblock %}
+<script src="{% static 'js/password-toggle.js' %}"></script>
 <script src="{% static 'js/utils.js' %}"></script>
 <script src="{% static 'js/share.js' %}"></script>
 <script src="{% static 'js/header.js' %}"></script>

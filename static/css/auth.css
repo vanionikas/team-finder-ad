@@ -82,3 +82,34 @@
     font-size: 13px;
     font-weight: 500;
 }
+
+.pw-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.pw-wrapper input {
+    flex: 1;
+    padding-right: 38px !important;
+}
+
+.pw-toggle {
+    position: absolute;
+    right: 8px;
+    background: none !important;
+    border: none !important;
+    margin-top: 0 !important;
+    padding: 4px !important;
+    width: auto !important;
+    color: #9ca3af;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+    user-select: none;
+}
+
+.pw-toggle:hover {
+    color: #111;
+}

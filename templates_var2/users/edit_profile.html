@@ -17,9 +17,9 @@
         <div class="avatar-upload">
             <div class="avatar-preview">
                 {% if user.avatar %}
-                    <img src="{{ user.avatar.url }}" alt="Аватар">
+                    <img id="avatar-img" src="{{ user.avatar.url }}" alt="Аватар">
                 {% else %}
-                    <img src="{% static 'images/default-avatar.png' %}" alt="Аватар по умолчанию">
+                    <img id="avatar-img" src="{% static 'images/default-avatar.png' %}" alt="Аватар по умолчанию">
                 {% endif %}
                 <div class="overlay">
                     <button type="button" onclick="document.getElementById('id_avatar').click()">Заменить</button>
@@ -27,6 +27,14 @@
             </div>
             {{ form.avatar }}
         </div>
+        <script>
+            document.getElementById('id_avatar').addEventListener('change', function () {
+                const file = this.files[0];
+                if (file) {
+                    document.getElementById('avatar-img').src = URL.createObjectURL(file);
+                }
+            });
+        </script>
 
         <div class="form-row">
             <div class="form-field">
